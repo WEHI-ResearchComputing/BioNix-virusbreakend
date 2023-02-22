@@ -1,6 +1,8 @@
 { bionix }:
 
 with bionix;
+with builtins;
+with compression;
 
 let
   hbv = fetchFastA {
@@ -11,9 +13,29 @@ let
     url = "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/chm13.draft_v1.0.fasta.gz";
     sha256 = "sha256-RFLpo174+DF3GPdh09J6HHO50NS439oJYWyuxDrWNG4=";
   };
-  chr1 = compression.uncompress {} chr1gz;
-  sequencelist = [ { fasta = hbv; name = "LC500247.1"; startingposition = 100; length = 80; gap = 100; }
-                   { fasta = chr1; name = "chr1"; startingposition = 100; length = 80; gap = 100; } ];
-
+  chr1 = uncompress {} chr1gz;
+  viruses = [ hbv ];
+  positions = [ 1000000 ];
+  depths = [ 5 ];
+  multiplier = 4 / 1000000;
+  relativeVirusPosition = position: position * multiplier;
+  alignments = map (virus:
+    map (position: let
+      virusReference =
+        insert {
+          fasta = chr1;
+          inherit position;
+          virusPosition = relativeVirusPosition position;
+        }
+        virus;
+    in
+      map (depth:
+        samtools.sort {} (bwa.mem { ref = ref.grch38.seq; } {
+          input1 = (art.illumina { inherit depth; } virusReference).out;
+          input2 = (art.illumina { inherit depth; } virusReference).pair;
+        }))
+      depths)
+    positions)
+  viruses;
 in
-  callBionix ./runiterations.nix { iterations = 3; productname = "chr1"; } sequencelist
+  elemAt (elemAt (elemAt alignments 0) 0) 0
